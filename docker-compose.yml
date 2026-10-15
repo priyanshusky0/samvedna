@@ -1,0 +1,32 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: samvedna
+      POSTGRES_PASSWORD: samvedna
+      POSTGRES_DB: samvedna
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U samvedna"]
+      interval: 5s
+      retries: 10
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://samvedna:samvedna@db:5432/samvedna
+      FIRMS_MAP_KEY: ${FIRMS_MAP_KEY:-}
+      ENABLE_SCHEDULER: "true"
+      AUTO_BACKFILL: "true"
+    ports:
+      - "8000:8000"
+    volumes:
+      - rawdata:/app/data/raw
+
+volumes:
+  pgdata:
+  rawdata:
