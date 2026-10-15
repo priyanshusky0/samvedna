@@ -25,7 +25,7 @@
     <li>All timestamps converted to Asia/Kolkata (IST).</li>
     <li>Rows outside the bounding box or the selected state polygons are rejected (offshore points within ~25 km go to the nearest state).</li>
     <li>FIRMS: “low” confidence detections dropped; detections by different satellites within {{ cfg.firms_dedup_distance_m|int }} m and {{ cfg.firms_dedup_minutes }} min collapsed to the most confident one; static industrial sources dropped.</li>
-    <li>GDELT: duplicate URLs and near-duplicate headlines (normalised-title hash) removed.</li>
+    <li>GDELT: duplicate URLs and near-duplicate headlines (normalised-title hash) removed; articles whose headline names none of the hazard's terms are dropped as off-topic.</li>
     <li>Range checks (magnitude ≥ 0, rainfall ≥ 0, plausible temperatures). Missing values stay missing; nothing is silently filled.</li>
     <li>Rejected-row counts per reason are stored with each fetch (see Data health).</li>
   </ul>
@@ -34,12 +34,12 @@
   <p>For every state and metric, today's value is compared with the previous {{ cfg.anomaly_window_days }} days (today excluded):</p>
   <p class="formula">z<sub>t</sub> = (x<sub>t</sub> − mean(x<sub>t−{{ cfg.anomaly_window_days }}</sub> … x<sub>t−1</sub>)) / sd(x<sub>t−{{ cfg.anomaly_window_days }}</sub> … x<sub>t−1</sub>)</p>
   <p>z ≥ {{ cfg.z_medium }} is <b>medium</b>, z ≥ {{ cfg.z_high }} is <b>high</b>. To avoid alerts on tiny numbers (one quake after a quiet month), each metric
-     also has a minimum absolute value. Temperature series with two years of data also get an <b>STL</b> seasonal decomposition; residuals more than
+     also has a minimum absolute value. Temperature series (five years of history) also get an <b>STL</b> seasonal decomposition; residuals more than
      {{ cfg.stl_resid_z }} robust standard deviations (1.4826 × MAD) above the seasonal expectation are flagged. Fire counts are also compared with the same
      ±15 days one year earlier (Suomi-NPP only), which works even without 30 days of recent history.</p>
 
   <h2>Trends, correlation and seasonality</h2>
-  <p><b>Mann-Kendall</b> (Hamed-Rao correction for autocorrelation) on complete weeks, with <b>Sen's slope</b> as the robust rate of change.
+  <p><b>Mann-Kendall</b> on complete weeks with <b>Sen's slope</b> as the robust rate of change: the <b>Seasonal</b> variant (each week compared only with the same week in other years) for the 5-year weather series, and the Hamed-Rao variant (autocorrelation-corrected) on the last 52 weeks for shorter series.
      <b>Spearman</b> rank correlation between daily hazard signals and GDELT news volume at lags 0–{{ cfg.max_lag_days }} days.
      The seasonal table compares this month so far with the same calendar days last year.</p>
 

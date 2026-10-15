@@ -62,6 +62,41 @@ def _ts(d: datetime) -> str:
     return d.strftime("%Y%m%d%H%M%S")
 
 
+def fetch_top_articles(hazard: str, days: int = 90) -> list[dict]:
+    """One request: the 250 most relevant articles over `days` (cheap fallback
+    when GDELT is throttling too hard for windowed backfills)."""
+    data = _gdelt({"query": HAZARD_QUERIES[hazard], "mode": "artlist", "maxrecords": 250,
+                   "sort": "hybridrel", "timespan": f"{days}d"}, ttl=86400)
+    return data.get("articles") or []
+
+
+def run_light(hazards: list[str], days: int = 90, articles: bool = True) -> int:
+    """Minimal-request backfill: one timeline (+ one relevance-ranked article list) per hazard."""
+    gaz = gazetteer()
+    with FetchRun(SOURCE) as fr:
+        for hazard in hazards:
+            try:
+                fr.inserted += upsert(NewsTimeline, fetch_timeline(hazard, days))
+            except Exception as exc:  # noqa: BLE001
+                log.warning("GDELT %s timeline failed: %s", hazard, exc)
+                fr.reject({"timeline_failed": 1})
+            if not articles:
+                continue
+            try:
+                raw = fetch_top_articles(hazard, days)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("GDELT %s top articles failed: %s", hazard, exc)
+                fr.reject({"window_failed": 1})
+                continue
+            fr.fetched += len(raw)
+            arts, rej = clean_gdelt_articles(raw, hazard, gaz, HAZARD_TITLE_TERMS[hazard])
+            fr.reject(rej)
+            if not arts.empty:
+                arts["tone"] = arts["title"].map(lambda t: _vader.polarity_scores(t)["compound"])
+            fr.inserted += upsert(NewsArticle, arts)
+        return fr.inserted
+
+
 def fetch_articles(hazard: str, start: datetime, end: datetime, ttl: int | None = None) -> list[dict]:
     data = _gdelt(
         {"query": HAZARD_QUERIES[hazard], "mode": "artlist", "maxrecords": 250,
@@ -76,8 +111,16 @@ def fetch_timeline(hazard: str, days: int) -> pd.DataFrame:
     span = f"{max(days, 1)}d"
     out = {}
     for mode, col in (("timelinevolraw", "volume"), ("timelinetone", "avg_tone")):
-        data = _gdelt({"query": HAZARD_QUERIES[hazard], "mode": mode, "timespan": span,
-                       "timelinesmooth": 0})
+        try:
+            data = _gdelt({"query": HAZARD_QUERIES[hazard], "mode": mode, "timespan": span,
+                           "timelinesmooth": 0})
+        except Exception as exc:  # noqa: BLE001
+            if col == "volume":
+                raise
+            # Tone is secondary: keep the volume series even if tone is throttled.
+            log.warning("GDELT %s tone timeline failed, storing volume only: %s", hazard, exc)
+            out[col] = pd.Series(dtype=float)
+            continue
         series = (data.get("timeline") or [{}])[0].get("data") or []
         s = pd.Series({d["date"]: d.get("value") for d in series}, dtype=float)
         if not s.empty:

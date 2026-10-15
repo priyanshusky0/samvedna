@@ -68,6 +68,7 @@ function initMap() {
       },
     }).addTo(map);
     stateLayer.bringToBack();
+    if (S.state) zoomToState(S.state);  // state came from the URL before polygons loaded
   });
 }
 let tiles;
@@ -163,7 +164,7 @@ function initMetricTabs() {
     const b = e.target.closest("button"); if (!b) return;
     S.metric = b.dataset.m;
     $("metric-tabs").querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
-    loadTimeseries();
+    loadTimeseries(); syncUrl();
   });
 }
 
@@ -263,6 +264,10 @@ async function loadHealth() {
 }
 
 /* -------------------------------------------------------------- wiring */
+function zoomToState(st) {
+  stateLayer.setStyle(stateStyle);
+  stateLayer.eachLayer((l) => { if (l.feature.properties.name === st) map.fitBounds(l.getBounds(), { padding: [20, 20] }); });
+}
 function setState(st) {
   S.state = st;
   $("state-select").value = st;
@@ -270,21 +275,43 @@ function setState(st) {
   $("state-chip-label").textContent = st;
   if (stateLayer) {
     stateLayer.setStyle(stateStyle);
-    if (st) stateLayer.eachLayer((l) => { if (l.feature.properties.name === st) map.fitBounds(l.getBounds(), { padding: [20, 20] }); });
+    if (st) zoomToState(st);
     else map.setView([18.5, 76.5], 5);
   }
   refresh();
 }
 function refreshCharts() { loadTimeseries(); loadNews(); }
+
+// Shareable URLs: ?state=Kerala&days=90&tab=stats&metric=rain&hazard=fire
+function syncUrl() {
+  const q = new URLSearchParams();
+  if (S.state) q.set("state", S.state);
+  if (S.days !== 30) q.set("days", S.days);
+  if (activePanel !== "news") q.set("tab", activePanel);
+  if (S.metric !== "fires") q.set("metric", S.metric);
+  if (S.hazard !== "flood") q.set("hazard", S.hazard);
+  try { history.replaceState(null, "", q.toString() ? "?" + q : location.pathname); } catch (e) {}
+}
+function readUrl() {
+  const q = new URLSearchParams(location.search);
+  if (q.get("days") && ["7", "30", "90"].includes(q.get("days"))) S.days = +q.get("days");
+  if (q.get("metric") && METRIC_TABS.some(([k]) => k === q.get("metric"))) S.metric = q.get("metric");
+  if (q.get("hazard")) S.hazard = q.get("hazard");
+  return { state: q.get("state") || "", tab: q.get("tab") || "news" };
+}
 let activePanel = "news";
 function refresh() {
+  syncUrl();
   loadSummary(); loadMap(); loadAlerts(); loadTimeseries(); loadNews();
   if (activePanel === "stats") loadStats();
   if (activePanel === "health") loadHealth();
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  const init = readUrl();
   initMap(); initMetricTabs();
+  $("days-seg").querySelectorAll("button").forEach((x) => x.classList.toggle("on", +x.dataset.days === S.days));
+  $("hazard-tabs").querySelectorAll("button").forEach((x) => x.classList.toggle("on", x.dataset.hz === S.hazard));
   $("state-select").addEventListener("change", (e) => setState(e.target.value));
   $("state-clear").addEventListener("click", () => setState(""));
   $("days-seg").addEventListener("click", (e) => {
@@ -297,16 +324,20 @@ document.addEventListener("DOMContentLoaded", () => {
     const b = e.target.closest("button"); if (!b) return;
     S.hazard = b.dataset.hz;
     $("hazard-tabs").querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
-    loadNews();
+    loadNews(); syncUrl();
   });
+  const showPanel = (name) => {
+    activePanel = name;
+    document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("on", x.dataset.panel === name));
+    document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("on", p.id === "panel-" + name));
+    if (name === "stats") loadStats();
+    if (name === "health") loadHealth();
+    syncUrl();
+  };
   document.querySelector(".tabs").addEventListener("click", (e) => {
-    const b = e.target.closest("button"); if (!b) return;
-    activePanel = b.dataset.panel;
-    document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("on", x === b));
-    document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("on", p.id === "panel-" + activePanel));
-    if (activePanel === "stats") loadStats();
-    if (activePanel === "health") loadHealth();
+    const b = e.target.closest("button"); if (b) showPanel(b.dataset.panel);
   });
-  refresh();
+  if (["stats", "health"].includes(init.tab)) { activePanel = init.tab; showPanel(init.tab); }
+  if (init.state) { setState(init.state); } else { refresh(); }
   setInterval(loadSummary, 5 * 60 * 1000);
 });

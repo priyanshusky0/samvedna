@@ -1,0 +1,26 @@
+# Render Blueprint: one Docker web service + a managed PostgreSQL database.
+# New > Blueprint in the Render dashboard, point it at this repo, then set
+# FIRMS_MAP_KEY (optional) in the service's Environment tab.
+services:
+  - type: web
+    name: samvedna
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: samvedna-db
+          property: connectionString
+      - key: ENABLE_SCHEDULER
+        value: "true"
+      - key: AUTO_BACKFILL
+        value: "true"
+      - key: FIRMS_MAP_KEY
+        sync: false
+
+databases:
+  - name: samvedna-db
+    plan: free
+    databaseName: samvedna
+    user: samvedna

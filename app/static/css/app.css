@@ -182,7 +182,7 @@ footer p { margin: 4px 0; }
 .leaflet-popup-content a { color: var(--accent); }
 
 /* About page */
-.prose { max-width: 860px; margin: 0 auto; padding: 24px 20px 50px; }
+.prose { display: block; max-width: 860px; margin: 0 auto; padding: 24px 20px 50px; }
 .prose h2 { font-size: 18px; margin: 26px 0 8px; }
 .prose p, .prose li { color: var(--text-2); }
 .prose code { font-family: var(--mono); font-size: 12.5px; background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
