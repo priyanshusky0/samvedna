@@ -4,7 +4,7 @@ from __future__ import annotations
 import csv
 import io
 import json
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Literal
 
 import pandas as pd
@@ -23,6 +23,7 @@ from app.models import (
     Alert, AnalysisResult, Earthquake, FetchLog, FireHotspot, NaturalEvent, NewsArticle,
     NewsTimeline, WeatherDaily,
 )
+from app.timeutil import today_ist
 
 router = APIRouter()
 SOURCES = ["firms", "firms_archive", "usgs", "eonet", "openmeteo", "gdelt"]
@@ -31,11 +32,16 @@ MAX_MAP_POINTS = 20_000
 
 
 def _since(days: int) -> datetime:
-    return datetime.combine(date.today() - timedelta(days=days - 1), datetime.min.time())
+    return datetime.combine(today_ist() - timedelta(days=days - 1), datetime.min.time())
 
 
 def _state_filter(stmt, col, state: str | None):
     return stmt.where(col == state) if state else stmt
+
+
+def _iso(dt: datetime | None) -> str | None:
+    """Stored times are naive IST: label them so browsers in any timezone parse them right."""
+    return None if dt is None else dt.isoformat(timespec="seconds") + "+05:30"
 
 
 def _num(v):
@@ -63,7 +69,7 @@ def summary(state: str | None = None, days: int = Query(30, ge=1, le=730), s: Se
         return s.scalar(_state_filter(stmt, scol, state)) or 0
 
     alert_stmt = _state_filter(
-        select(Alert.severity, func.count()).where(Alert.date >= date.today() - timedelta(days=7)),
+        select(Alert.severity, func.count()).where(Alert.date >= today_ist() - timedelta(days=7)),
         Alert.state, state,
     ).group_by(Alert.severity)
     active = dict(s.execute(alert_stmt).all())
@@ -131,10 +137,11 @@ def timeseries(metric: str = "fires", state: str | None = None, days: int = Quer
     col = state if state in wide.columns else ("India" if "India" in wide.columns else "All states")
     if wide.empty or col not in wide.columns:
         return {"metric": metric, "region": col, "points": []}
-    rz = rolling_z(wide[col].astype(float), cfg.anomaly_window_days, cfg.anomaly_min_periods)
-    rz = rz[rz.index >= pd.Timestamp(date.today() - timedelta(days=days - 1))]
-    rz = rz[rz.index <= pd.Timestamp(date.today())]
     m = METRICS[metric]
+    rz = rolling_z(wide[col].astype(float), cfg.anomaly_window_days, cfg.anomaly_min_periods,
+                   log=m.kind == "count")
+    rz = rz[rz.index >= pd.Timestamp(today_ist() - timedelta(days=days - 1))]
+    rz = rz[rz.index <= pd.Timestamp(today_ist())]
     pts = []
     for day, r in rz.iterrows():
         z = r["z"]
@@ -142,7 +149,7 @@ def timeseries(metric: str = "fires", state: str | None = None, days: int = Quer
         if z == z and r["value"] >= m.min_alert_value:
             flag = "high" if z >= cfg.z_high else "medium" if z >= cfg.z_medium else None
         pts.append({"date": str(day.date()), "value": _num(r["value"]), "mean": _num(r["mean"]),
-                    "std": _num(r["std"]), "z": _num(z), "flag": flag})
+                    "lo": _num(r["lo"]), "hi": _num(r["hi"]), "z": _num(z), "flag": flag})
     return {"metric": metric, "label": m.label, "unit": m.unit, "region": col,
             "national_only": col == "India", "points": pts}
 
@@ -151,7 +158,7 @@ def timeseries(metric: str = "fires", state: str | None = None, days: int = Quer
 def alerts(severity: Literal["high", "medium"] | None = None, state: str | None = None,
            days: int = Query(30, ge=1, le=365), limit: int = Query(200, le=1000),
            s: Session = Depends(get_session)):
-    stmt = select(Alert).where(Alert.date >= date.today() - timedelta(days=days - 1))
+    stmt = select(Alert).where(Alert.date >= today_ist() - timedelta(days=days - 1))
     if severity:
         stmt = stmt.where(Alert.severity == severity)
     if state:
@@ -204,7 +211,7 @@ def news(hazard: Literal["flood", "fire", "earthquake", "heat_drought"] = "flood
     metric = HAZARD_METRIC[hazard]
     hz = with_total(load(metric), metric)
     hz_col = state if state in hz.columns else "All states"
-    since = pd.Timestamp(date.today() - timedelta(days=days - 1))
+    since = pd.Timestamp(today_ist() - timedelta(days=days - 1))
     hz_s = hz[hz_col][hz.index >= since] if hz_col in hz.columns else pd.Series(dtype=float)
     hz_map = {str(d.date()): _num(v) for d, v in hz_s.items()}
     tone = [t for t in nlp.tone_series(hazard, df) if t["date"] >= str(since.date())]
@@ -236,8 +243,8 @@ def health(s: Session = Depends(get_session)):
         last_ok = s.scalar(select(func.max(FetchLog.finished_at))
                            .where(FetchLog.source == src, FetchLog.status == "ok"))
         out[src] = None if last is None else {
-            "status": last.status, "started_at": str(last.started_at), "finished_at": str(last.finished_at),
-            "last_success": str(last_ok) if last_ok else None, "fetched": last.fetched,
+            "status": last.status, "started_at": _iso(last.started_at), "finished_at": _iso(last.finished_at),
+            "last_success": _iso(last_ok), "fetched": last.fetched,
             "inserted": last.inserted, "rejected": last.rejected,
             "rejected_reasons": json.loads(last.rejected_reasons or "{}"), "error": last.error,
         }

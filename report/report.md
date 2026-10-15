@@ -25,7 +25,7 @@ The design goal throughout was **explainability**: every alert can be traced to 
 
 | Source | Content | Access | Volume collected |
 |---|---|---|---|
-| NASA FIRMS | VIIRS active-fire detections (NOAA-20, Suomi-NPP), near real time | Area API with free MAP_KEY; public 7-day CSV without a key | 2,733 hotspots, 8–15 Oct 2026 |
+| NASA FIRMS | VIIRS active-fire detections (NOAA-20, Suomi-NPP), near real time | Area API with free MAP_KEY (public 7-day CSV fallback) | 11,597 hotspots, 17 Jul–15 Oct 2026 |
 | NASA FIRMS archive | Suomi-NPP yearly India file (standard processing) | Public download | 220,393 hotspots, 1 Jan–31 Dec 2025 |
 | USGS FDSN | Earthquakes M ≥ 2.5 | Open API, no key | 35 events, Jun 2017–Oct 2026 |
 | Open-Meteo | Daily rainfall, Tmax, Tmin, wind (ERA5 archive + forecast) at each state capital | Open API, no key | 18,630 state-days, Sep 2021–Oct 2026 (+7-day forecast) |
@@ -55,7 +55,7 @@ The design goal throughout was **explainability**: every alert can be traced to 
 - **Scheduling:** APScheduler runs inside the web process. FIRMS, USGS and EONET are fetched hourly, GDELT every 2 h and weather daily, and each fetch triggers re-analysis.
 - **Front end:** server-rendered Jinja2 with vanilla JavaScript, Leaflet (heatmap, clustering, clickable state polygons) and Chart.js.
 - **Packaging:** Docker and docker-compose; a Render Blueprint (`render.yaml`) deploys a web service with managed Postgres.
-- **Tests:** 29 pytest tests cover the cleaning rules, statistics, API routes and an empty-database start.
+- **Tests:** 32 pytest tests cover the cleaning rules, statistics, API routes and an empty-database start.
 
 ## 4. Data pipeline and cleaning
 
@@ -91,7 +91,8 @@ $$ z_t = \frac{x_t - \bar{x}_{t-30:t-1}}{s_{t-30:t-1}} $$
 - **Baseline:** the previous 30 days. Today is excluded (`shift(1)`) so a spike cannot inflate its own baseline.
 - **Minimum history:** at least 14 observed baseline days.
 - **Severity:** medium if z ≥ 2, high if z ≥ 3. Under normality these correspond to roughly 1-in-44 and 1-in-740 days.
-- **Minimum absolute value:** fires ≥ 5, quakes ≥ 2, rain ≥ 15 mm, Tmax ≥ 37 °C, news ≥ 5 articles. Counts and rainfall are skewed, so z is used as a ranking score, and this floor stops trivial alerts such as 0 → 1 quake. If the baseline standard deviation is 0, z is undefined (NaN), not infinite.
+- **Counts use a log scale:** for fires, quakes and news, z is computed on $\log(1+x)$. Counts vary multiplicatively (a cloudy week, then a clear one), and on raw counts the rule flagged about 10 % of fire days (102 alerts in 90 days). On the log scale it flags 22. Messages still quote real counts against the *typical* (geometric-mean) day, and the chart's usual-range band is asymmetric.
+- **Minimum absolute value:** fires ≥ 10, quakes ≥ 2, rain ≥ 15 mm, Tmax ≥ 37 °C, news ≥ 5 articles. Counts and rainfall are skewed, so z is used as a ranking score, and this floor stops trivial alerts such as 0 → 1 quake. If the baseline standard deviation is 0, z is undefined (NaN), not infinite.
 - **Why 30 days:** long enough for a stable mean, short enough to follow the season (monsoon onset and withdrawal shift rainfall within weeks).
 
 ### 5.2 STL seasonal residuals (temperature)
@@ -111,9 +112,9 @@ During development, a unit test showed that with only 2 years STL absorbed an in
 
 STL is not applied to rainfall. Rain is zero on most days, so the MAD is ~0 and the first attempt produced z ≈ 10⁹.
 
-### 5.3 Same-season baseline (fires)
+### 5.3 Same-season baseline (fires, fallback)
 
-Fire activity is dominated by an agricultural and forest-burning calendar (Figure 1). Without a FIRMS key, only 7 recent days are available, so no 30-day baseline exists. Today's Suomi-NPP count is therefore compared with the mean and standard deviation of Suomi-NPP daily counts in the **±15 days around the same date one year earlier**. Only Suomi-NPP is used, because the 2025 archive is single-sensor and mixing in NOAA-20 would double the count (§7.2).
+Fire activity is dominated by an agricultural and forest-burning calendar (Figure 1). Without a FIRMS key, only 7 recent days are available, so no 30-day baseline exists. On those days only, today's Suomi-NPP count is therefore compared with the mean and standard deviation of Suomi-NPP daily counts in the **±15 days around the same date one year earlier**, again on log counts. Only Suomi-NPP is used, because the 2025 archive is single-sensor and mixing in NOAA-20 would double the count (§7.2).
 
 ### 5.4 Trend tests
 
@@ -158,25 +159,28 @@ In 2025 the ten states recorded **220,335** cleaned Suomi-NPP detections.
 
 *Planning implication:* fire-response readiness should be highest from February to April and focused on central India.
 
-### 7.2 This October's fire activity is about double last year's
+### 7.2 This October's fire activity is about three times last year's
 
-![Figure 2: Suomi-NPP detections, 8–15 Oct 2026 vs the same days in 2025](figures/fig2_fire_yoy.png)
+![Figure 2: Suomi-NPP detections, 1–14 Oct 2026 vs the same days in 2025](figures/fig2_fire_yoy.png)
 
-For the same calendar days (8–15 October), Suomi-NPP detected **172 hotspots/day in 2026 vs 84/day in 2025 (+105 %)**. The largest relative increases were:
-- Andhra Pradesh (+246 %)
-- Telangana (+221 %)
-- Tamil Nadu (+170 %)
-- Karnataka (+145 %)
+On the same calendar days (1–14 October, 14 observed days), Suomi-NPP detected **167 hotspots/day in 2026 vs 56/day in 2025 (+197 %)**. Every state with meaningful activity rose. The largest relative increases were:
+- Telangana (+456 %)
+- Karnataka (+251 %)
+- Maharashtra (+243 %)
+- Madhya Pradesh (+210 %)
 
-The same-season detector raised **21 fire alerts**. The strongest: *"Fire hotspots in Andhra Pradesh (Suomi-NPP): 34 on 12 Oct vs 4/day at this time last year (z = 7.2)"*.
+Within 2026, the rolling detector flagged **22 fire anomalies** in 90 days. The strongest: *"Fire hotspots in Rajasthan: 196 detections/day on 12 Oct vs typical 10 over the previous 30 days (z = 3.3)"*, roughly 20× a normal day, consistent with the start of post-kharif residue burning.
 
-A naive comparison that included the second satellite showed **+510 %**. The artefact was caught and fixed by restricting both years to one sensor. The 2026 values are near-real-time while 2025 is standard processing, which may account for a small part of the difference.
+**Caveats.**
+- A naive comparison that mixed both satellites showed **+510 %**. Restricting both years to one sensor (Suomi-NPP) is the fair comparison.
+- 2026 is near-real-time data while 2025 is the reprocessed standard product. NRT tends to keep a few more marginal detections, so part of the gap may be processing rather than more fire.
+- The direction (a much earlier and stronger start to the October burning season) is consistent across all eight active states.
 
 ### 7.3 Mid-October heat in Mumbai and Goa, 5–6 °C above the seasonal norm
 
-STL flagged **6 temperature anomalies** in the last week, all on the west coast:
+STL flagged **7 temperature anomalies** in October, all on the west coast:
 - **Goa: 37.5 °C on 13 Oct vs 31.1 °C** expected for the season (z = 6.2).
-- **Mumbai** (the Maharashtra point): **37.1–38.2 °C on 8–13 Oct vs 31.8–33.4 °C** expected (z = 4.2–5.4).
+- **Mumbai** (the Maharashtra point): **37.0–38.2 °C on six days between 3 and 13 Oct vs 31.0–33.4 °C** expected (z = 4.2–5.5).
 
 These days came partly from Open-Meteo's forecast model, so they were cross-checked against the ERA5 archive. Over 20 overlapping days the two differ by only **0.04 °C on average**, so the anomaly is not a data-source artefact. Seasonally, this is the "October heat" after the monsoon withdraws; the magnitude is unusual.
 
@@ -184,10 +188,10 @@ These days came partly from Open-Meteo's forecast model, so they were cross-chec
 
 ![Figure 3: Tamil Nadu daily rainfall with anomaly flags](figures/fig3_rain_anomaly.png)
 
-**Rain bursts.** The rolling z-score flagged **36 rainfall anomalies** in the last 90 days, including:
+**Rain bursts.** The rolling z-score flagged **34 rainfall anomalies** in the last 90 days, including:
 - **Gujarat: 90.5 mm on 23 July vs a 30-day mean of 3.3 mm (z = 17.3)**;
 - Andhra Pradesh: 39.0 mm on 23 Sep (z = 8.4);
-- Tamil Nadu: **23.6 mm on 15 Oct (z = 7.2)**, plausibly the onset of the north-east monsoon (Figure 3).
+- Tamil Nadu: **22.6 mm on 14 Sep (z = 6.2)**, with further bursts as the north-east monsoon approaches (Figure 3).
 
 Month to date, October rainfall is **60 % below** the same days of 2025 across the ten capitals, and more than 90 % below in Goa, Rajasthan and Madhya Pradesh.
 

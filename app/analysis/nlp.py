@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import numpy as np
 import pandas as pd
@@ -22,6 +22,7 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.db import engine
 from app.models import NewsArticle, NewsTimeline
+from app.timeutil import now_ist
 
 log = logging.getLogger("samvedna.nlp")
 
@@ -40,7 +41,7 @@ def _vectorizer(min_df: int = 2) -> TfidfVectorizer:
 
 
 def load_articles(hazard: str | None = None, state: str | None = None, days: int = 90) -> pd.DataFrame:
-    stmt = select(NewsArticle).where(NewsArticle.seen_at_ist >= datetime.now() - timedelta(days=days))
+    stmt = select(NewsArticle).where(NewsArticle.seen_at_ist >= now_ist() - timedelta(days=days))
     if hazard:
         stmt = stmt.where(NewsArticle.hazard_tag == hazard)
     if state:

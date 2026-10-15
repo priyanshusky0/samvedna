@@ -176,13 +176,14 @@ async function loadTimeseries() {
     $("ts-label").textContent = d.label || "Daily value";
     const pts = d.points || [];
     const labels = pts.map((p) => shortDate(p.date));
-    const up = pts.map((p) => (p.mean === null || p.std === null ? null : p.mean + 2 * p.std));
-    const lo = pts.map((p) => (p.mean === null || p.std === null ? null : Math.max(0, p.mean - 2 * p.std)));
+    // Band comes from the API (asymmetric for counts, which use a log scale).
+    const up = pts.map((p) => p.hi);
+    const lo = pts.map((p) => (p.lo === null ? null : Math.max(0, p.lo)));
     const flagColor = pts.map((p) => (p.flag === "high" ? css("--critical") : p.flag === "medium" ? css("--warning") : "transparent"));
     const ds = [
       { label: "+2σ", data: up, borderWidth: 0, pointRadius: 0, fill: "+1", backgroundColor: css("--band"), spanGaps: false },
       { label: "−2σ", data: lo, borderWidth: 0, pointRadius: 0, fill: false, spanGaps: false },
-      { label: "30-day mean", data: pts.map((p) => p.mean), borderColor: css("--baseline"), borderWidth: 1.5, borderDash: [4, 3], pointRadius: 0, spanGaps: false },
+      { label: "30-day baseline", data: pts.map((p) => p.mean), borderColor: css("--baseline"), borderWidth: 1.5, borderDash: [4, 3], pointRadius: 0, spanGaps: false },
       { label: d.label || "Value", data: pts.map((p) => p.value), borderColor: css("--series-1"), borderWidth: 2, tension: 0.2, spanGaps: false,
         pointRadius: pts.map((p) => (p.flag ? 5 : 0)), pointHoverRadius: 5, pointBackgroundColor: flagColor, pointBorderColor: css("--surface"), pointBorderWidth: 2 },
     ];
@@ -256,7 +257,7 @@ async function loadStats() {
 async function loadHealth() {
   const d = await api("health");
   $("health-table").innerHTML = `<thead><tr><th>Source</th><th>Status</th><th>Last run</th><th>Last success</th><th class="n">Fetched</th><th class="n">New rows</th><th class="n">Rejected</th><th>Rejection reasons</th></tr></thead><tbody>` +
-    Object.entries(d.sources).map(([src, v]) => v ? `<tr><td>${SOURCE_LABEL[src]}</td><td><span class="dot ${v.status}"></span>${esc(v.status)}</td><td class="small">${esc(v.finished_at.slice(0, 16))}</td><td class="small">${ago(v.last_success)}</td>
+    Object.entries(d.sources).map(([src, v]) => v ? `<tr><td>${SOURCE_LABEL[src]}</td><td><span class="dot ${v.status}"></span>${esc(v.status)}</td><td class="small">${esc((v.finished_at || "").slice(0, 16).replace("T", " "))} IST</td><td class="small">${ago(v.last_success)}</td>
       <td class="n">${fmt(v.fetched)}</td><td class="n">${fmt(v.inserted)}</td><td class="n">${fmt(v.rejected)}</td>
       <td class="small">${Object.entries(v.rejected_reasons).map(([k, n]) => `${esc(k)}: ${fmt(n)}`).join(", ") || "–"}${v.error ? `<div style="color:var(--critical)">${esc(v.error.slice(0, 160))}</div>` : ""}</td></tr>`
       : `<tr><td>${SOURCE_LABEL[src]}</td><td colspan="7" class="muted">not run yet</td></tr>`).join("") + "</tbody>";

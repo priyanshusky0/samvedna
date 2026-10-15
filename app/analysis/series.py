@@ -15,6 +15,7 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.db import engine
 from app.models import Earthquake, FireHotspot, NewsArticle, NewsTimeline, WeatherDaily
+from app.timeutil import today_ist
 
 
 @dataclass(frozen=True)
@@ -29,7 +30,7 @@ class Metric:
 
 
 METRICS: dict[str, Metric] = {
-    "fires": Metric("fires", "Fire hotspots", "detections/day", "firms", "count", 5),
+    "fires": Metric("fires", "Fire hotspots", "detections/day", "firms", "count", 10),
     "quakes": Metric("quakes", "Earthquakes (M2.5+)", "events/day", "usgs", "count", 2),
     "rain": Metric("rain", "Rainfall", "mm/day", "openmeteo", "level", 15.0),  # zero-inflated: no STL
     "tmax": Metric("tmax", "Max temperature", "°C", "openmeteo", "level", 37.0, stl=True),
@@ -57,7 +58,7 @@ def _pivot_counts(df: pd.DataFrame, time_col: str, covered: pd.DatetimeIndex | N
         return _empty(states)
     df["day"] = pd.to_datetime(df[time_col]).dt.normalize()
     wide = df.groupby(["day", "state"]).size().unstack("state").reindex(columns=states)
-    idx = pd.date_range(wide.index.min(), pd.Timestamp.today().normalize(), freq="D")
+    idx = pd.date_range(wide.index.min(), pd.Timestamp(today_ist()).normalize(), freq="D")
     wide = wide.reindex(idx).fillna(0)
     if covered is not None:
         wide.loc[~wide.index.isin(covered)] = float("nan")

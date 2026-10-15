@@ -22,6 +22,7 @@ from app.config import get_settings
 from app.fetchers.base import FetchError, FetchRun, _client, fetch_text
 from app.fetchers.store import upsert
 from app.models import FireHotspot
+from app.timeutil import today_ist
 
 log = logging.getLogger("samvedna.firms")
 SOURCE = "firms"
@@ -55,7 +56,7 @@ def fetch_raw(days: int) -> pd.DataFrame:
     if cfg.firms_map_key:
         w, s, e, n = cfg.bbox
         area = f"{w},{s},{e},{n}"
-        end = date.today()
+        end = today_ist()
         start = end - timedelta(days=days - 1)
         for source in cfg.firms_sources:
             for d, rng in _windows(start, end, cfg.firms_window_days):
@@ -97,8 +98,19 @@ def run_archive(year: int) -> int:
     with FetchRun(f"{SOURCE}_archive") as fr:
         if not dest.exists():
             _download(ARCHIVE_URL.format(year=year), dest)
-        for raw in pd.read_csv(dest, chunksize=100_000):
+        # Only the columns we use, compact dtypes, modest chunks: fits a 512 MB instance.
+        cols = ["latitude", "longitude", "bright_ti4", "acq_date", "acq_time", "satellite",
+                "confidence", "frp", "daynight", "type"]
+        # lat/lon stay float64: they feed the rounded-coordinate primary key.
+        dtypes = {"bright_ti4": "float32", "frp": "float32",
+                  "acq_time": "int16", "type": "int8", "satellite": "category", "confidence": "category",
+                  "daynight": "category"}
+        w, s_, e, n = cfg.bbox
+        for raw in pd.read_csv(dest, usecols=cols, dtype=dtypes, chunksize=50_000):
             fr.fetched += len(raw)
+            inside = raw["latitude"].between(s_, n) & raw["longitude"].between(w, e)
+            fr.reject({"outside_bbox": int((~inside).sum())})
+            raw = raw[inside]
             clean, rej = clean_firms(raw)
             fr.reject(rej)
             fr.inserted += upsert(FireHotspot, clean)

@@ -115,14 +115,16 @@ def clean_firms(raw: pd.DataFrame) -> tuple[pd.DataFrame, Counter]:
         df = _reject(df, pd.to_numeric(df["type"], errors="coerce").isin([2, 3]), "static_or_offshore_source", rej)
 
     # acq_time is HHMM in UTC, sometimes without leading zeros.
-    hhmm = df["acq_time"].astype(str).str.zfill(4)
-    df["acq_datetime_ist"] = to_ist(df["acq_date"].astype(str) + " " + hhmm.str[:2] + ":" + hhmm.str[2:])
+    df["acq_hhmm"] = df["acq_time"].astype(str).str.zfill(4)
+    df["acq_datetime_ist"] = to_ist(df["acq_date"].astype(str) + " " + df["acq_hhmm"].str[:2] + ":"
+                                    + df["acq_hhmm"].str[2:])
     df = _reject(df, df["acq_datetime_ist"].isna(), "bad_timestamp", rej)
     df = _geo_filter(df, rej)
 
     df["id"] = [
         sha1(s, round(a, 5), round(o, 5), d, t)
-        for s, a, o, d, t in zip(df["satellite"], df["lat"], df["lon"], df["acq_date"], hhmm)
+        # Columns of the *filtered* frame, so every id uses its own row's values.
+        for s, a, o, d, t in zip(df["satellite"], df["lat"], df["lon"], df["acq_date"], df["acq_hhmm"])
     ]
     n = len(df)
     df = df.drop_duplicates("id")

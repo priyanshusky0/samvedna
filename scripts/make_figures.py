@@ -4,7 +4,7 @@
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 import matplotlib
@@ -18,6 +18,7 @@ import pandas as pd  # noqa: E402
 from app.analysis.anomalies import rolling_z  # noqa: E402
 from app.analysis.series import SNPP, fires_daily, load, with_total  # noqa: E402
 from app.config import get_settings  # noqa: E402
+from app.timeutil import today_ist  # noqa: E402
 
 OUT = Path(__file__).resolve().parent.parent / "report" / "figures"
 BLUE, ORANGE, AQUA = "#2a78d6", "#eb6834", "#1baf7a"
@@ -50,7 +51,7 @@ def fire_seasonality() -> None:
 
 def fire_yoy() -> None:
     wide = fires_daily(satellite=SNPP)
-    cur = wide[wide.index >= pd.Timestamp(date.today().replace(day=1))].dropna(how="all")
+    cur = wide[wide.index >= pd.Timestamp(today_ist().replace(day=1))].dropna(how="all")
     prev = wide.reindex(cur.index - pd.DateOffset(years=1))
     c, p = cur.sum(), prev.sum()
     order = c.sort_values().index
@@ -71,7 +72,7 @@ def rain_anomaly(state: str = "Tamil Nadu") -> None:
     cfg = get_settings()
     s = load("rain")[state]
     rz = rolling_z(s, cfg.anomaly_window_days, cfg.anomaly_min_periods)
-    rz = rz[(rz.index >= pd.Timestamp(date.today() - timedelta(days=89))) & (rz.index <= pd.Timestamp(date.today()))]
+    rz = rz[(rz.index >= pd.Timestamp(today_ist() - timedelta(days=89))) & (rz.index <= pd.Timestamp(today_ist()))]
     fig, ax = plt.subplots(figsize=(7, 2.8))
     ax.fill_between(rz.index, (rz["mean"] - 2 * rz["std"]).clip(lower=0), rz["mean"] + 2 * rz["std"],
                     color=GREY, alpha=0.18, lw=0, label="±2σ band")
@@ -92,7 +93,7 @@ def news_vs_hazard() -> None:
     news = load("news_flood")["India"]
     rain = with_total(load("rain"), "rain")["All states"]
     start = news.dropna().index.min()
-    idx = pd.date_range(start, pd.Timestamp(date.today()))
+    idx = pd.date_range(start, pd.Timestamp(today_ist()))
     fig, (a1, a2) = plt.subplots(2, 1, figsize=(7, 3.6), sharex=True)
     a1.bar(idx, news.reindex(idx), color=BLUE, width=0.85)
     a1.set_ylabel("articles / day")

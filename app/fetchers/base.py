@@ -15,7 +15,7 @@ import logging
 import threading
 import time
 from collections import Counter
-from datetime import datetime
+
 from urllib.parse import urlencode, urlparse
 
 import httpx
@@ -29,12 +29,18 @@ from tenacity import (
 from app.config import get_settings
 from app.db import session_scope
 from app.models import FetchLog
+from app.timeutil import now_ist
 
 log = logging.getLogger("samvedna.fetch")
 settings = get_settings()
 
 # Seconds to wait between two requests to the same host.
-HOST_MIN_INTERVAL = {"api.gdeltproject.org": settings.gdelt_min_interval_s}
+HOST_MIN_INTERVAL = {
+    "api.gdeltproject.org": settings.gdelt_min_interval_s,
+    "api.open-meteo.com": 2.0,
+    "archive-api.open-meteo.com": 3.0,   # archive calls are "heavy" in Open-Meteo's quota
+    "power.larc.nasa.gov": 2.0,
+}
 DEFAULT_MIN_INTERVAL = 1.0
 REQUEST_DEADLINE_S = 120.0
 
@@ -48,8 +54,24 @@ class FetchError(RuntimeError):
 
 def _retryable(exc: BaseException) -> bool:
     if isinstance(exc, httpx.HTTPStatusError):
+        if exc.response.status_code == 429 and quota_exhausted(exc):
+            return False  # waiting minutes won't help; let the caller fall back
         return exc.response.status_code == 429 or exc.response.status_code >= 500
     return isinstance(exc, (httpx.TransportError, httpx.TimeoutException))
+
+
+def quota_exhausted(exc: BaseException) -> bool:
+    """True for a 429 that reports an hourly/daily quota (e.g. Open-Meteo's
+    "Daily API request limit exceeded"), as opposed to a short burst limit."""
+    if not isinstance(exc, httpx.HTTPStatusError) or exc.response.status_code != 429:
+        return False
+    try:
+        body = exc.response.text.lower()
+    except Exception:  # noqa: BLE001
+        return False
+    # Open-Meteo's wording. (GDELT's burst-limit text mentions a "daily newsletter",
+    # so matching the bare word "daily" would disable its retries.)
+    return "daily api request limit" in body or "hourly api request limit" in body
 
 
 def _throttle(host: str) -> None:
@@ -129,9 +151,9 @@ def fetch_text(
 
     settings.cache_dir.mkdir(parents=True, exist_ok=True)
     cache_file.write_text(body)
-    raw_dir = settings.raw_dir / source / datetime.now().strftime("%Y-%m-%d")
+    raw_dir = settings.raw_dir / source / now_ist().strftime("%Y-%m-%d")
     raw_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%H%M%S")
+    stamp = now_ist().strftime("%H%M%S")
     (raw_dir / f"{stamp}_{key[:10]}.txt").write_text(body)
     with (raw_dir / "index.jsonl").open("a") as f:
         f.write(json.dumps({"file": f"{stamp}_{key[:10]}.txt", "url": shown}) + "\n")
@@ -163,7 +185,7 @@ class FetchRun:
         self.rejected.update(reasons)
 
     def __enter__(self) -> FetchRun:
-        self.started = datetime.now()
+        self.started = now_ist()
         return self
 
     def __exit__(self, exc_type, exc, tb) -> bool:
@@ -173,7 +195,7 @@ class FetchRun:
                 FetchLog(
                     source=self.source,
                     started_at=self.started,
-                    finished_at=datetime.now(),
+                    finished_at=now_ist(),
                     fetched=self.fetched,
                     inserted=self.inserted,
                     rejected=sum(self.rejected.values()),

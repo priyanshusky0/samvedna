@@ -98,7 +98,7 @@ Server-rendered HTML plus about 400 lines of vanilla JS. One state object (`{sta
 - `docker-compose.yml` (app + postgres:16 with a healthcheck).
 - `scripts/entrypoint.sh`: migrate, then a background backfill if the database is empty, then serve.
 - `render.yaml`: a Render Blueprint.
-- Tests: 29 pytest tests covering cleaning rules, statistics, API routes and an empty database.
+- Tests: 32 pytest tests covering cleaning rules, statistics, API routes and an empty database.
 
 ---
 
@@ -109,7 +109,7 @@ A fixed threshold ignores context. 100 fires is normal for Madhya Pradesh in Apr
 
 **2. Your data isn't normal: counts are skewed and rainfall is mostly zero. Isn't the z-score wrong?**
 Partly, yes. That's why:
-- (a) every alert also needs a minimum absolute value;
+- (a) count metrics (fires, quakes, news) use z on log(1 + count), which cut fire alerts from 102 to 22 in 90 days, and every alert also needs a minimum absolute value;
 - (b) rainfall does not use STL, because its median absolute deviation is ~0 and the first run produced z ≈ 10⁹;
 - (c) STL uses a robust scale (1.4826 × MAD);
 - (d) the trend and correlation tests are rank-based (Mann-Kendall, Spearman).
@@ -179,5 +179,7 @@ For production I'd add rate limiting on the API, a CSP header, pinned dependency
 - GDELT's aggressive throttling: I moved to adaptive backoff and per-window saving.
 - Discovering the satellite mismatch in year-over-year fire counts.
 - STL silently absorbing anomalies with too few seasonal cycles.
+- A subtle id bug: fire ids were zipped against an unfiltered column, so they depended on which *other* rows were dropped. It only showed up as 209k duplicates when I changed the filter order. I fixed it, added a regression test, and wrote a data migration to rebuild the table.
+- Deployment surprises: UTC server clocks and a shared cloud IP that hit Open-Meteo's quota. I fixed them with explicit IST clocks and a NASA POWER fallback.
 
-All three were caught because I checked outputs against intuition and wrote tests for the edge cases. The lesson: statistics code can run without errors and still be wrong, so sanity checks and documented assumptions are part of the job.
+All of these were caught because I checked outputs against intuition and wrote tests for the edge cases. The lesson: statistics code can run without errors and still be wrong, so sanity checks and documented assumptions are part of the job.

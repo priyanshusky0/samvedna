@@ -9,7 +9,8 @@
 3. Same-season baseline (fires): today's Suomi-NPP count vs the mean / std of
    Suomi-NPP daily counts in a +/-15-day window one year earlier. This works
    even when the last 30 days are not available (no FIRMS key) and respects
-   the strong seasonality of agricultural / forest burning.
+   the strong seasonality of agricultural / forest burning. It runs only on
+   days with no 30-day baseline (e.g. without a FIRMS key), on log counts.
 """
 from __future__ import annotations
 
@@ -25,15 +26,29 @@ from app.analysis.series import METRICS, SNPP, fires_daily, load, with_total
 from app.config import get_settings
 from app.db import session_scope
 from app.models import Alert
+from app.timeutil import today_ist
 
 log = logging.getLogger("samvedna.anomalies")
 
 
-def rolling_z(s: pd.Series, window: int, min_periods: int) -> pd.DataFrame:
-    base = s.shift(1).rolling(window, min_periods=min_periods)
+def rolling_z(s: pd.Series, window: int, min_periods: int, log: bool = False) -> pd.DataFrame:
+    """Rolling z-score against the previous `window` days (today excluded).
+
+    log=True (counts): the z-score is computed on log(1 + x), because counts
+    vary multiplicatively (a cloudy week then a clear one), and raw z-scores
+    flagged ~10% of fire days. `mean`, `lo`, `hi` are always returned in the
+    original units: for log, mean is the typical (geometric) day and the
+    +/-2 sd band is asymmetric.
+    """
+    t = np.log1p(s.clip(lower=0)) if log else s
+    base = t.shift(1).rolling(window, min_periods=min_periods)
     mean, std = base.mean(), base.std()
-    z = (s - mean) / std.replace(0, np.nan)
-    return pd.DataFrame({"value": s, "mean": mean, "std": std, "z": z})
+    z = (t - mean) / std.replace(0, np.nan)
+    back = np.expm1 if log else (lambda x: x)
+    return pd.DataFrame({
+        "value": s, "mean": back(mean), "std": std, "z": z,
+        "lo": back(mean - 2 * std).clip(lower=0) if log else mean - 2 * std, "hi": back(mean + 2 * std),
+    })
 
 
 def severity(z: float) -> str | None:
@@ -74,7 +89,7 @@ def detect(metric: str, since: date) -> list[dict]:
         s = wide[region].astype(float)
         if s.dropna().empty:
             continue
-        rz = rolling_z(s, cfg.anomaly_window_days, cfg.anomaly_min_periods)
+        rz = rolling_z(s, cfg.anomaly_window_days, cfg.anomaly_min_periods, log=m.kind == "count")
         recent = rz[(rz.index >= pd.Timestamp(since)) & rz["z"].notna()]
         for day, r in recent.iterrows():
             sev = severity(r["z"])
@@ -86,7 +101,8 @@ def detect(metric: str, since: date) -> list[dict]:
                 "metric": metric, "value": r["value"], "baseline_mean": r["mean"],
                 "baseline_std": r["std"], "z_score": r["z"], "severity": sev,
                 "message": f"{m.label} {where}: {_fmt(r['value'], m.unit)} {m.unit} on {day:%d %b} vs "
-                           f"{cfg.anomaly_window_days}-day mean {_fmt(r['mean'], m.unit)} (z = {r['z']:.1f})",
+                           f"{'typical' if m.kind == 'count' else 'mean'} {_fmt(r['mean'], m.unit)} over the previous "
+                           f"{cfg.anomaly_window_days} days (z = {r['z']:.1f})",
             })
         if m.stl and len(s.dropna()) >= cfg.stl_min_days:
             stl = stl_residual_z(s)
@@ -113,13 +129,19 @@ def seasonal_fire_alerts(since: date, half_window: int = 15) -> list[dict]:
     out = []
     for region in wide.columns:
         s = wide[region]
-        for day, value in s[(s.index >= pd.Timestamp(since))].dropna().items():
+        # Fallback only: skip days that already have a 30-day rolling baseline.
+        rolling = rolling_z(s.astype(float), cfg.anomaly_window_days, cfg.anomaly_min_periods, log=True)
+        no_baseline = rolling["z"].isna()
+        for day, value in s[(s.index >= pd.Timestamp(since)) & no_baseline].dropna().items():
             ly = day - pd.DateOffset(years=1)
             base = s[(s.index >= ly - pd.Timedelta(days=half_window)) &
                      (s.index <= ly + pd.Timedelta(days=half_window))].dropna()
-            if len(base) < half_window or base.std() == 0:
+            if len(base) < half_window:
                 continue
-            z = (value - base.mean()) / base.std()
+            lb = np.log1p(base)  # same log-count scale as the rolling detector
+            if lb.std() == 0:
+                continue
+            z = (np.log1p(value) - lb.mean()) / lb.std()
             sev = severity(z)
             if sev is None or value < METRICS["fires"].min_alert_value:
                 continue
@@ -136,7 +158,7 @@ def seasonal_fire_alerts(since: date, half_window: int = 15) -> list[dict]:
 
 def run(history_days: int = 90) -> list[dict]:
     """Recompute alerts for the last `history_days` and replace the alerts table."""
-    since = date.today() - timedelta(days=history_days)
+    since = today_ist() - timedelta(days=history_days)
     alerts: list[dict] = []
     for metric in METRICS:
         try:

@@ -6,19 +6,20 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+
 
 from app.analysis import anomalies, correlation, nlp, trends
 from app.db import session_scope
 from app.fetchers.gdelt import HAZARD_QUERIES
 from app.models import AnalysisResult
+from app.timeutil import now_ist
 
 log = logging.getLogger("samvedna.analysis")
 
 
 def _save(kind: str, payload) -> None:
     with session_scope() as s:
-        s.merge(AnalysisResult(kind=kind, computed_at=datetime.now(),
+        s.merge(AnalysisResult(kind=kind, computed_at=now_ist(),
                                payload=json.dumps(payload, default=str, allow_nan=False)))
 
 

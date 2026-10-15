@@ -17,6 +17,7 @@ import pandas as pd
 import pymannkendall as mk
 
 from app.analysis.series import METRICS, SNPP, fires_daily, load, with_total
+from app.timeutil import today_ist
 
 WEEKLY_AGG = {"count": "sum", "level": "mean"}
 TREND_METRICS = ["fires", "rain", "tmax", "news_flood", "news_fire", "news_earthquake", "news_heat_drought"]
@@ -25,7 +26,7 @@ TREND_METRICS = ["fires", "rain", "tmax", "news_flood", "news_fire", "news_earth
 def weekly(s: pd.Series, how: str, max_weeks: int | None = 52) -> pd.Series:
     if s.dropna().empty or not isinstance(s.index, pd.DatetimeIndex):
         return pd.Series(dtype=float)
-    s = s[s.index <= pd.Timestamp(date.today())]
+    s = s[s.index <= pd.Timestamp(today_ist())]
     grp = s.resample("W-SUN")
     complete = grp.count() == 7
     agg = grp.sum(min_count=7) if how == "sum" else grp.mean()
@@ -73,7 +74,7 @@ def run_trends() -> list[dict]:
 
 def run_seasonal(today: date | None = None) -> list[dict]:
     """Month-to-date this year vs the same calendar days last year."""
-    today = today or date.today()
+    today = today or today_ist()
     start = today.replace(day=1)
     rows = []
     for metric in ["fires", "rain", "tmax"]:

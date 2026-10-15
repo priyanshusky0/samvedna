@@ -131,3 +131,55 @@ def test_gdelt_windows_are_day_aligned_and_cover_range():
     assert all(e.hour == 0 for _, e in ws[1:])
     assert ws[-1][0] == now - timedelta(days=30)
     assert all(a[0] == b[1] for a, b in zip(ws, ws[1:]))  # contiguous, no gaps
+
+
+def test_weather_falls_back_to_nasa_power(monkeypatch):
+    import httpx
+
+    from app.fetchers import openmeteo
+
+    req = httpx.Request("GET", "https://api.open-meteo.com/v1/forecast")
+    resp = httpx.Response(429, request=req, text='{"reason":"Daily API request limit exceeded"}')
+
+    def boom(*a, **k):
+        raise httpx.HTTPStatusError("429", request=req, response=resp)
+
+    power_calls = []
+
+    def fake_power(state, lat, lon, start):
+        power_calls.append(state)
+        df, _ = clean_weather(state, {"time": ["2026-10-10"], "precipitation_sum": [1.0], "temperature_2m_max": [30],
+                                      "temperature_2m_min": [20], "wind_speed_10m_max": [10]}, is_forecast=False)
+        df["source"] = "nasa-power"
+        return df, 1, {}
+
+    monkeypatch.setattr(openmeteo, "_open_meteo", boom)
+    monkeypatch.setattr(openmeteo, "_nasa_power", fake_power)
+    openmeteo.run(history_days=30)
+    assert len(power_calls) == 10  # every state still gets data
+
+
+def test_firms_id_uses_own_row_after_filtering():
+    """Regression: ids were zipped against an unfiltered time column, so a
+    dropped row shifted every later id onto the wrong acquisition time."""
+    from app.cleaning.normalize import sha1
+    raw = pd.DataFrame([firms_row(confidence="l", acq_time="0100"), firms_row(acq_time="0745")])
+    clean, _ = clean_firms(raw)
+    assert clean["id"].iloc[0] == sha1("N", 19.9, 75.3, "2026-10-10", "0745")
+    # Same row alone gives the same id: ids don't depend on what else was filtered.
+    alone, _ = clean_firms(pd.DataFrame([firms_row(acq_time="0745")]))
+    assert alone["id"].iloc[0] == clean["id"].iloc[0]
+
+
+def test_quota_exhausted_only_for_long_window_limits():
+    import httpx
+
+    from app.fetchers.base import quota_exhausted
+
+    def err(text):
+        req = httpx.Request("GET", "https://x")
+        return httpx.HTTPStatusError("429", request=req, response=httpx.Response(429, request=req, text=text))
+
+    assert quota_exhausted(err('{"error":true,"reason":"Daily API request limit exceeded. Please try again tomorrow."}'))
+    gdelt = "Please limit requests to one every 5 seconds ... For trend analysis, please see our daily newsletter"
+    assert not quota_exhausted(err(gdelt))

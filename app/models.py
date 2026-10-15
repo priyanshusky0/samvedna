@@ -46,6 +46,7 @@ class WeatherDaily(Base):
     tmin: Mapped[float | None] = mapped_column(Float)
     wind_max: Mapped[float | None] = mapped_column(Float)
     is_forecast: Mapped[bool] = mapped_column(default=False)
+    source: Mapped[str] = mapped_column(String(16), default="open-meteo", server_default="open-meteo")
 
 
 class NaturalEvent(Base):

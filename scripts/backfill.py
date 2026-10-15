@@ -2,13 +2,13 @@
 
     python -m scripts.backfill               # 90 days, all sources
     python -m scripts.backfill --only gdelt  # a single source
-    python -m scripts.backfill --if-empty    # no-op if data already exists (Docker)
+    python -m scripts.backfill --if-empty    # no-op if data already exists
+    python -m scripts.backfill --missing-only  # only sources that never succeeded (container start)
 """
 from __future__ import annotations
 
 import argparse
 import logging
-from datetime import date
 
 from sqlalchemy import func, select
 
@@ -16,6 +16,7 @@ from app.config import get_settings
 from app.db import session_scope
 from app.fetchers import eonet, firms, gdelt, openmeteo, usgs
 from app.models import Earthquake, FetchLog, FireHotspot, NaturalEvent, NewsArticle, NewsTimeline, WeatherDaily
+from app.timeutil import today_ist
 
 log = logging.getLogger("samvedna.backfill")
 
@@ -45,6 +46,8 @@ def main() -> None:
     p.add_argument("--days", type=int, default=cfg.backfill_days)
     p.add_argument("--only", choices=["firms", "firms_archive", "usgs", "openmeteo", "eonet", "gdelt"])
     p.add_argument("--if-empty", action="store_true")
+    p.add_argument("--missing-only", action="store_true",
+                   help="skip sources that already have a successful fetch (safe to run on every boot)")
     p.add_argument("--skip-analysis", action="store_true")
     p.add_argument("--hazards", nargs="+", choices=list(gdelt.HAZARD_QUERIES),
                    help="GDELT only: limit to these hazard queries")
@@ -63,11 +66,19 @@ def main() -> None:
         "openmeteo": lambda: openmeteo.run(history_days=cfg.weather_history_days),
         "firms": lambda: firms.run(days=args.days),
         # Previous full year from FIRMS' public yearly file: seasonal baseline.
-        "firms_archive": lambda: firms.run_archive(date.today().year - 1),
-        "gdelt": lambda: gdelt.run(days=args.days, hazards=args.hazards),
+        "firms_archive": lambda: firms.run_archive(today_ist().year - 1),
+        # Cheap pass first (timelines + top articles, ~8 requests) so the
+        # dashboard has news quickly even if GDELT throttles the windowed pass.
+        "gdelt": lambda: (gdelt.run_light(args.hazards or list(gdelt.HAZARD_QUERIES), days=args.days),
+                          gdelt.run(days=args.days, hazards=args.hazards)),
     }
+    done: set[str] = set()
+    if args.missing_only:
+        with session_scope() as s:
+            done = set(s.scalars(select(FetchLog.source).where(FetchLog.status == "ok").distinct()))
+        log.info("already fetched successfully, skipping: %s", sorted(done))
     for name, job in jobs.items():
-        if args.only and name != args.only:
+        if (args.only and name != args.only) or name in done:
             continue
         try:
             job()
