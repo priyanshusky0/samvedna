@@ -36,6 +36,7 @@ settings = get_settings()
 # Seconds to wait between two requests to the same host.
 HOST_MIN_INTERVAL = {"api.gdeltproject.org": settings.gdelt_min_interval_s}
 DEFAULT_MIN_INTERVAL = 1.0
+REQUEST_DEADLINE_S = 120.0
 
 _last_call: dict[str, float] = {}
 _lock = threading.Lock()
@@ -75,7 +76,16 @@ _client = httpx.Client(
 )
 def _get(url: str) -> httpx.Response:
     _throttle(urlparse(url).netloc)
-    resp = _client.get(url)
+    # httpx's read timeout is per chunk, so a server trickling bytes can hold a
+    # request open forever. Enforce a wall-clock deadline for the whole body.
+    deadline = time.monotonic() + REQUEST_DEADLINE_S
+    with _client.stream("GET", url) as resp:
+        chunks = []
+        for chunk in resp.iter_bytes():
+            chunks.append(chunk)
+            if time.monotonic() > deadline:
+                raise httpx.ReadTimeout(f"exceeded {REQUEST_DEADLINE_S}s total", request=resp.request)
+        resp._content = b"".join(chunks)
     if resp.status_code == 429:
         # Adaptive politeness: each 429 doubles this host's minimum gap (max 60 s).
         host = urlparse(url).netloc

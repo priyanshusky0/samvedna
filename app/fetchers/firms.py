@@ -13,7 +13,9 @@ import io
 import logging
 from datetime import date, timedelta
 
+import httpx
 import pandas as pd
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from app.cleaning.normalize import clean_firms
 from app.config import get_settings
@@ -73,20 +75,28 @@ def fetch_raw(days: int) -> pd.DataFrame:
 ARCHIVE_URL = "https://firms.modaps.eosdis.nasa.gov/data/country/viirs-snpp/{year}/viirs-snpp_{year}_India.csv"
 
 
+@retry(retry=retry_if_exception_type(httpx.TransportError), wait=wait_exponential(multiplier=30, max=300),
+       stop=stop_after_attempt(4), reraise=True)
+def _download(url: str, dest) -> None:
+    """Stream a large file to `dest` atomically (FIRMS' file server is slow and drops connections)."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(".part")
+    log.info("downloading %s", url)
+    with _client.stream("GET", url, timeout=httpx.Timeout(300.0, connect=30.0)) as resp:
+        resp.raise_for_status()
+        with tmp.open("wb") as f:
+            for chunk in resp.iter_bytes():
+                f.write(chunk)
+    tmp.rename(dest)
+
+
 def run_archive(year: int) -> int:
     """Stream the yearly India file to data/raw (once), clean and upsert it."""
     cfg = get_settings()
     dest = cfg.raw_dir / "firms_archive" / f"viirs-snpp_{year}_India.csv"
     with FetchRun(f"{SOURCE}_archive") as fr:
         if not dest.exists():
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            tmp = dest.with_suffix(".part")
-            with _client.stream("GET", ARCHIVE_URL.format(year=year)) as resp:
-                resp.raise_for_status()
-                with tmp.open("wb") as f:
-                    for chunk in resp.iter_bytes():
-                        f.write(chunk)
-            tmp.rename(dest)
+            _download(ARCHIVE_URL.format(year=year), dest)
         for raw in pd.read_csv(dest, chunksize=100_000):
             fr.fetched += len(raw)
             clean, rej = clean_firms(raw)

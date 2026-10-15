@@ -92,27 +92,38 @@ def fetch_timeline(hazard: str, days: int) -> pd.DataFrame:
     return df
 
 
-def run(days: int = 1, window_days: int = 14) -> int:
+def windows(now: datetime, days: int, window_days: int) -> list[tuple[datetime, datetime]]:
+    """Newest-first [start, end) windows. Boundaries fall on UTC midnights so
+    closed windows have stable URLs and hit the 24 h cache on re-runs."""
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    floor = now - timedelta(days=days)
+    out = [(max(midnight, floor), now)] if now > midnight else []
+    end = midnight
+    while end > floor:
+        start = max(end - timedelta(days=window_days), floor)
+        out.append((start, end))
+        end = start
+    return out
+
+
+def run(days: int = 1, window_days: int = 14, hazards: list[str] | None = None) -> int:
     """Pull articles in `window_days` slices (250 max per request) plus timelines.
 
     Each window is stored as soon as it arrives and a failed window is skipped
     (and counted in fetch_log), so a GDELT throttling episode only loses that slice.
     """
-    end = datetime.now(timezone.utc).replace(microsecond=0)
+    now = datetime.now(timezone.utc).replace(microsecond=0)
     gaz = gazetteer()
     with FetchRun(SOURCE) as fr:
-        for hazard in HAZARD_QUERIES:
-            w_end = end
-            while w_end > end - timedelta(days=days):
-                w_start = max(w_end - timedelta(days=window_days), end - timedelta(days=days))
+        for hazard in hazards or list(HAZARD_QUERIES):
+            for w_start, w_end in windows(now, days, window_days):
                 # Closed historical windows don't change: cache for a day.
-                ttl = 86400 if w_end < end else None
+                ttl = 86400 if w_end < now else None
                 try:
                     raw = fetch_articles(hazard, w_start, w_end, ttl=ttl)
                 except Exception as exc:  # noqa: BLE001
                     log.warning("GDELT %s window %s..%s failed: %s", hazard, w_start, w_end, exc)
                     fr.reject({"window_failed": 1})
-                    w_end = w_start
                     continue
                 fr.fetched += len(raw)
                 arts, rej = clean_gdelt_articles(raw, hazard, gaz, HAZARD_TITLE_TERMS[hazard])
@@ -122,7 +133,6 @@ def run(days: int = 1, window_days: int = 14) -> int:
                     # (compound, -1..1). Aggregate tone comes from GDELT's timeline.
                     arts["tone"] = arts["title"].map(lambda t: _vader.polarity_scores(t)["compound"])
                 fr.inserted += upsert(NewsArticle, arts)
-                w_end = w_start
             try:
                 fr.inserted += upsert(NewsTimeline, fetch_timeline(hazard, max(days, 7)))
             except Exception as exc:  # noqa: BLE001

@@ -239,10 +239,10 @@ async function loadStats() {
   const [tr, co, se] = await Promise.all([api("trends"), api("correlation"), api("seasonal")]);
   const t = (tr.results || []).filter((r) => !S.state || r.region === S.state || r.region === "All states" || r.region === "India")
     .sort((a, b) => a.p_value - b.p_value);
-  $("trends-table").innerHTML = `<thead><tr><th>Metric</th><th>Region</th><th>Trend</th><th class="n">Sen's slope</th><th class="n">τ</th><th class="n">p</th><th>Weeks</th></tr></thead><tbody>` +
-    (t.map((r) => `<tr><td>${esc(r.label)}</td><td>${esc(r.region)}</td><td><span class="arrow">${r.trend === "increasing" ? "↑" : r.trend === "decreasing" ? "↓" : "–"}</span> ${esc(r.trend)}</td>
+  $("trends-table").innerHTML = `<thead><tr><th>Metric</th><th>Region</th><th>Test</th><th>Trend</th><th class="n">Sen's slope</th><th class="n">τ</th><th class="n">p</th><th>Weeks</th></tr></thead><tbody>` +
+    (t.map((r) => `<tr><td>${esc(r.label)}</td><td>${esc(r.region)}</td><td class="small">${esc(r.test || "")}</td><td><span class="arrow">${r.trend === "increasing" ? "↑" : r.trend === "decreasing" ? "↓" : "–"}</span> ${esc(r.trend)}</td>
       <td class="n">${fmt(r.sens_slope, 2)} <span class="muted small">${esc(r.unit)}</span></td><td class="n">${fmt(r.tau, 2)}</td><td class="n">${r.p_value < 0.001 ? "&lt;0.001" : fmt(r.p_value, 3)}</td>
-      <td class="small">${r.n_weeks} (${esc(r.start)} → ${esc(r.end)})</td></tr>`).join("") || `<tr><td colspan="7" class="empty">Not computed yet.</td></tr>`) + "</tbody>";
+      <td class="small">${r.n_weeks} (${esc(r.start)} → ${esc(r.end)})</td></tr>`).join("") || `<tr><td colspan="8" class="empty">Not computed yet.</td></tr>`) + "</tbody>";
   $("corr-table").innerHTML = `<thead><tr><th>Pair</th><th class="n">lag 0</th><th class="n">lag 1</th><th class="n">lag 2</th><th class="n">lag 3</th><th>Strongest</th><th class="n">n</th></tr></thead><tbody>` +
     ((co.results || []).map((r) => `<tr><td>${esc(r.pair)}</td>${r.lags.map((l) => `<td class="n">${l.rho === null ? "–" : fmt(l.rho, 2)}${l.p_value !== null && l.p_value < 0.05 ? "*" : ""}</td>`).join("")}
       <td>${r.best_lag === null ? "insufficient overlap" : `ρ = ${fmt(r.best_rho, 2)} at ${r.best_lag} d`}</td><td class="n">${r.n}</td></tr>`).join("") || `<tr><td colspan="7" class="empty">Not computed yet.</td></tr>`) + "</tbody>";

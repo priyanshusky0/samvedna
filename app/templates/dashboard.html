@@ -114,7 +114,7 @@
     </div>
 
     <div class="panel" id="panel-stats">
-      <div class="explain"><b>Mann-Kendall trend test</b> asks whether a weekly series rises or falls consistently, without assuming a straight line or normal data. <b>Sen's slope</b> is the median change per week. Hamed-Rao correction accounts for autocorrelation. p &lt; 0.05 = significant.</div>
+      <div class="explain"><b>Mann-Kendall trend test</b> asks whether a weekly series rises or falls consistently, without assuming a straight line or normal data. <b>Sen's slope</b> is the median rate of change. Weather (5 years) uses the <b>Seasonal</b> test, which compares each week only with the same week in other years, so the annual cycle can't pose as a trend (slope per year). Shorter series use the Hamed-Rao test on the last 52 weeks (slope per week); that describes direction within the window and may reflect the season. p &lt; 0.05 = significant.</div>
       <div class="table-wrap"><table id="trends-table"></table></div>
       <div class="explain" style="margin-top:16px"><b>Lagged Spearman correlation</b> between a daily hazard signal and next-day news volume (lag k: news k days after the hazard). A peak at k &gt; 0 means coverage <i>follows</i> events.</div>
       <div class="table-wrap"><table id="corr-table"></table></div>

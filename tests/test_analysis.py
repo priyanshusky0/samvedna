@@ -69,3 +69,15 @@ def test_nlp_keywords_and_topics():
     assert "india" not in kws and len(kws) > 5
     tps = topics(df, 4)
     assert len(tps) >= 3 and abs(sum(t["share"] for t in tps) - 1) < 1e-6
+
+
+def test_seasonal_mann_kendall_ignores_annual_cycle():
+    rng = np.random.default_rng(3)
+    idx = pd.date_range("2021-01-03", periods=5 * 364, freq="D")
+    cycle = 10 * np.sin(2 * np.pi * np.arange(len(idx)) / 364)
+    flat = pd.Series(30 + cycle + rng.normal(0, 1, len(idx)), index=idx)
+    res = mann_kendall(weekly(flat, "mean", max_weeks=None))
+    assert res["test"].startswith("Seasonal") and res["trend"] == "no trend"
+    warming = flat + np.arange(len(idx)) * (0.5 / 364)  # +0.5 °C per year
+    res = mann_kendall(weekly(warming, "mean", max_weeks=None))
+    assert res["trend"] == "increasing" and 0.3 < res["sens_slope"] < 0.7

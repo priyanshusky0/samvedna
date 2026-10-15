@@ -1,8 +1,12 @@
 """Trend tests and seasonal comparison.
 
-Mann-Kendall (Hamed-Rao variance correction for autocorrelation, which weekly
-weather and fire series always have) on weekly aggregates, plus Sen's slope.
-Only complete weeks (all 7 days observed) enter the test.
+Weekly aggregates, complete weeks only (all 7 days observed), plus Sen's slope.
+- >= 3 years of weekly data (weather): Seasonal Mann-Kendall (period 52), which
+  compares each week-of-year only with the same week in other years, so the
+  annual cycle cannot masquerade as a trend. Slope = change per *year*.
+- shorter series (fires, news): Hamed-Rao modified Mann-Kendall on the last 52
+  weeks (corrects for autocorrelation). This describes the direction within the
+  window, which may be the seasonal cycle itself; the report says so.
 """
 from __future__ import annotations
 
@@ -18,24 +22,36 @@ WEEKLY_AGG = {"count": "sum", "level": "mean"}
 TREND_METRICS = ["fires", "rain", "tmax", "news_flood", "news_fire", "news_earthquake", "news_heat_drought"]
 
 
-def weekly(s: pd.Series, how: str, max_weeks: int = 52) -> pd.Series:
+def weekly(s: pd.Series, how: str, max_weeks: int | None = 52) -> pd.Series:
     if s.dropna().empty or not isinstance(s.index, pd.DatetimeIndex):
         return pd.Series(dtype=float)
     s = s[s.index <= pd.Timestamp(date.today())]
     grp = s.resample("W-SUN")
     complete = grp.count() == 7
     agg = grp.sum(min_count=7) if how == "sum" else grp.mean()
-    return agg[complete].dropna().tail(max_weeks)
+    out = agg[complete].dropna()
+    return out.tail(max_weeks) if max_weeks else out
+
+
+SEASONAL_MIN_WEEKS = 3 * 52
 
 
 def mann_kendall(w: pd.Series) -> dict | None:
     if len(w) < 8 or w.nunique() < 3:
         return None
-    r = mk.hamed_rao_modification_test(w.to_numpy())
+    seasonal = len(w) >= SEASONAL_MIN_WEEKS
+    if seasonal:
+        # Regular weekly grid (missing weeks as NaN) so week-of-year alignment holds.
+        grid = w.asfreq("W-SUN")
+        r = mk.seasonal_test(grid.to_numpy(), period=52)
+    else:
+        r = mk.hamed_rao_modification_test(w.to_numpy())
     return {
+        "test": "Seasonal MK (52 wk)" if seasonal else "Hamed-Rao MK",
         "trend": r.trend, "p_value": float(r.p), "tau": float(r.Tau),
-        "sens_slope": float(r.slope), "n_weeks": len(w),
-        "start": str(w.index.min().date()), "end": str(w.index.max().date()),
+        # seasonal_test's slope is per seasonal cycle (= per year).
+        "sens_slope": float(r.slope), "slope_per": "year" if seasonal else "week",
+        "n_weeks": len(w), "start": str(w.index.min().date()), "end": str(w.index.max().date()),
     }
 
 
@@ -45,11 +61,13 @@ def run_trends() -> list[dict]:
         m = METRICS[metric]
         wide = with_total(load(metric), metric)
         for region in wide.columns:
-            res = mann_kendall(weekly(wide[region].astype(float), WEEKLY_AGG[m.kind]))
+            w = weekly(wide[region].astype(float), WEEKLY_AGG[m.kind], max_weeks=None)
+            # Short histories: keep the last 52 weeks only.
+            res = mann_kendall(w if len(w) >= SEASONAL_MIN_WEEKS else w.tail(52))
             if res:
                 unit = m.unit.replace("/day", "/week") if m.kind == "count" else m.unit
                 rows.append({"metric": metric, "label": m.label, "region": region,
-                             "unit": f"{unit} per week", **res})
+                             "unit": f"{unit} per {res['slope_per']}", **res})
     return rows
 
 

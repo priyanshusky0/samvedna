@@ -119,3 +119,15 @@ def test_geotag_first_mention_wins_and_whole_words():
     assert geotag_title("Kerala and Karnataka brace for rain", g) == "Kerala"
     assert geotag_title("Goalkeeper injured", g) is None   # 'goa' must be a whole word
     assert normalise_title("  Floods: KERALA!! ") == "floods kerala"
+
+
+def test_gdelt_windows_are_day_aligned_and_cover_range():
+    from datetime import datetime, timedelta, timezone
+
+    from app.fetchers.gdelt import windows
+    now = datetime(2026, 10, 15, 6, 30, tzinfo=timezone.utc)
+    ws = windows(now, 30, 14)
+    assert ws[0] == (datetime(2026, 10, 15, tzinfo=timezone.utc), now)
+    assert all(e.hour == 0 for _, e in ws[1:])
+    assert ws[-1][0] == now - timedelta(days=30)
+    assert all(a[0] == b[1] for a, b in zip(ws, ws[1:]))  # contiguous, no gaps

@@ -46,6 +46,8 @@ def main() -> None:
     p.add_argument("--only", choices=["firms", "firms_archive", "usgs", "openmeteo", "eonet", "gdelt"])
     p.add_argument("--if-empty", action="store_true")
     p.add_argument("--skip-analysis", action="store_true")
+    p.add_argument("--hazards", nargs="+", choices=list(gdelt.HAZARD_QUERIES),
+                   help="GDELT only: limit to these hazard queries")
     args = p.parse_args()
 
     if args.if_empty:
@@ -62,7 +64,7 @@ def main() -> None:
         "firms": lambda: firms.run(days=args.days),
         # Previous full year from FIRMS' public yearly file: seasonal baseline.
         "firms_archive": lambda: firms.run_archive(date.today().year - 1),
-        "gdelt": lambda: gdelt.run(days=args.days),
+        "gdelt": lambda: gdelt.run(days=args.days, hazards=args.hazards),
     }
     for name, job in jobs.items():
         if args.only and name != args.only:
