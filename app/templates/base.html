@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}SAMVEDNA{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono&display=swap" rel="stylesheet">
+  <script>
+    // Apply saved theme before paint to avoid a flash.
+    try { const t = localStorage.getItem("samvedna-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
+  {% block head %}{% endblock %}
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">S</div>
+      <div>
+        <h1>SAMVEDNA</h1>
+        <p>Open-source hazard &amp; news monitoring · southern and western India</p>
+      </div>
+    </div>
+    <nav>
+      <a href="/" class="{% if active == 'dash' %}active{% endif %}">Dashboard</a>
+      <a href="/about" class="{% if active == 'about' %}active{% endif %}">Methodology</a>
+      <a href="/docs">API</a>
+    </nav>
+    {% block controls %}{% endblock %}
+    <button class="icon-btn" id="theme-toggle" title="Toggle dark / light theme" aria-label="Toggle theme">◐</button>
+  </div>
+  {% block subheader %}{% endblock %}
+</header>
+{% block body %}{% endblock %}
+<footer>
+  <p><b>Data sources:</b> NASA FIRMS (VIIRS active fires; NASA open data policy) ·
+     USGS Earthquake Hazards Program (public domain) ·
+     Open-Meteo (CC BY 4.0; ERA5 reanalysis via Copernicus) ·
+     NASA EONET (open) · The GDELT Project (free for unrestricted use with attribution) ·
+     State boundaries: geoBoundaries / DataMeet India (CC BY 2.5 IN) · Map tiles © OpenStreetMap contributors (ODbL).</p>
+  <p>Independent student project for learning and demonstration. Not an official product of any government body. Boundaries are illustrative only.</p>
+</footer>
+<script>
+  document.getElementById("theme-toggle").addEventListener("click", () => {
+    const root = document.documentElement;
+    const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+    root.dataset.theme = dark ? "light" : "dark";
+    try { localStorage.setItem("samvedna-theme", root.dataset.theme); } catch (e) {}
+    window.dispatchEvent(new Event("themechange"));
+  });
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

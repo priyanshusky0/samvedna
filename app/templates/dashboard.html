@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% set active = 'dash' %}
+{% block title %}SAMVEDNA · Dashboard{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.min.css">
+{% endblock %}
+{% block controls %}
+<div class="controls">
+  <label class="small muted" for="state-select">Region</label>
+  <select id="state-select">
+    <option value="">All states</option>
+    {% for s in states %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+  </select>
+  <div class="seg" id="days-seg" role="group" aria-label="Date range">
+    <button data-days="7">7d</button><button data-days="30" class="on">30d</button><button data-days="90">90d</button>
+  </div>
+</div>
+{% endblock %}
+{% block subheader %}<div class="freshness" id="freshness"><span class="skeleton" style="width:420px"></span></div>{% endblock %}
+
+{% block body %}
+<main>
+  <section class="kpis" aria-label="Key indicators">
+    <div class="card kpi"><div class="label"><span class="swatch" style="background:var(--series-2)"></span>Fire hotspots</div><div class="value num" id="k-fires">–</div><div class="sub" id="k-fires-sub">&nbsp;</div></div>
+    <div class="card kpi"><div class="label"><span class="swatch" style="background:var(--series-1)"></span>Earthquakes M2.5+</div><div class="value num" id="k-quakes">–</div><div class="sub">USGS catalogue</div></div>
+    <div class="card kpi"><div class="label"><span class="swatch" style="background:var(--series-3)"></span>Natural events</div><div class="value num" id="k-events">–</div><div class="sub">NASA EONET</div></div>
+    <div class="card kpi"><div class="label">News articles</div><div class="value num" id="k-news">–</div><div class="sub" id="k-news-sub">GDELT, hazard queries</div></div>
+    <div class="card kpi alerts"><div class="label">Active alerts (7 d)</div>
+      <div class="value num"><span><span class="sev high"><span class="ic"></span>High</span> <span id="k-high">–</span></span>
+      <span><span class="sev medium"><span class="ic"></span>Med</span> <span id="k-med">–</span></span></div>
+      <div class="sub">z-score / seasonal / STL</div></div>
+  </section>
+
+  <section class="row-map">
+    <div class="card">
+      <div class="card-h">
+        <h2>Hazard map</h2>
+        <span class="filter-chip" id="state-chip"><span id="state-chip-label"></span><button aria-label="Clear state filter" id="state-clear">×</button></span>
+        <div class="layer-toggles">
+          <label><input type="checkbox" data-layer="fires" checked><span class="legend-swatch" style="background:var(--series-2)"></span>Fire density</label>
+          <label><input type="checkbox" data-layer="quakes" checked><span class="legend-swatch" style="background:var(--series-1)"></span>Earthquakes</label>
+          <label><input type="checkbox" data-layer="events" checked><span class="legend-swatch" style="background:var(--series-3)"></span>EONET events</label>
+        </div>
+      </div>
+      <div class="note" style="padding:0 16px 8px">Click a state to filter the whole dashboard. Quake circles are sized by magnitude.</div>
+      <div style="position:relative"><div id="map"></div><div class="loading-overlay" id="map-loading">Loading map layers…</div></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h2>Alerts</h2><span class="small muted" id="alerts-count"></span></div>
+      <div class="alerts-list" id="alerts"><div class="skeleton" style="height:60px;margin:10px 0"></div><div class="skeleton" style="height:60px"></div></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-h">
+      <h2>Time series <span class="muted small" id="ts-region"></span></h2>
+      <div class="metric-tabs" id="metric-tabs"></div>
+    </div>
+    <div class="card-b">
+      <div class="chart-legend">
+        <span><i style="background:var(--series-1)"></i><span id="ts-label">Daily value</span></span>
+        <span><i style="background:var(--baseline)"></i>30-day rolling mean</span>
+        <span><i class="band"></i>±2σ band</span>
+        <span><i class="pt" style="background:var(--warning)"></i>z ≥ 2</span>
+        <span><i class="pt" style="background:var(--critical)"></i>z ≥ 3</span>
+      </div>
+      <div class="chart-box"><canvas id="ts-chart" aria-label="Time series chart"></canvas></div>
+      <div class="note" id="ts-note"></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="tabs" role="tablist">
+      <button class="on" data-panel="news">News intelligence</button>
+      <button data-panel="stats">Statistics</button>
+      <button data-panel="health">Data health</button>
+    </div>
+
+    <div class="panel on" id="panel-news">
+      <div class="sub-h">
+        <div class="metric-tabs" id="hazard-tabs">
+          <button data-hz="flood" class="on">Flood / cyclone</button><button data-hz="fire">Wildfire</button>
+          <button data-hz="earthquake">Earthquake</button><button data-hz="heat_drought">Heat / drought</button>
+        </div>
+        <span class="small muted" id="news-n"></span>
+      </div>
+      <div class="grid-2">
+        <div>
+          <h3>Coverage vs physical signal</h3>
+          <div class="chart-legend"><span><i style="background:var(--series-1)"></i>News articles / day (GDELT, India)</span></div>
+          <div class="chart-box short"><canvas id="news-vol"></canvas></div>
+          <div class="chart-legend" style="margin-top:8px"><span><i style="background:var(--series-2)"></i><span id="hz-label">Hazard</span></span></div>
+          <div class="chart-box short"><canvas id="news-hz"></canvas></div>
+          <div class="note">Two aligned charts share one time axis instead of a dual-axis chart, so neither scale distorts the other.</div>
+        </div>
+        <div>
+          <h3>Tone over time</h3>
+          <div class="chart-legend"><span><i style="background:var(--series-1)"></i>GDELT average tone</span><span><i style="background:var(--series-3)"></i>Headline sentiment (VADER × 10)</span></div>
+          <div class="chart-box short"><canvas id="news-tone"></canvas></div>
+          <div class="note">Below zero = negative coverage. GDELT tone is document-level; VADER scores only our headlines, scaled ×10 to share the axis range.</div>
+          <h3 style="margin-top:14px">Top keywords (TF-IDF)</h3>
+          <div class="kw-list" id="keywords"></div>
+        </div>
+      </div>
+      <h3 style="margin:18px 0 8px">Topic clusters (NMF on headlines)</h3>
+      <div class="grid-3" id="topics"></div>
+      <div class="grid-2" style="margin-top:16px">
+        <div><h3>Latest headlines</h3><ul class="headlines" id="headlines"></ul></div>
+        <div><h3>What each week was about</h3><div class="weekly" id="weekly"></div>
+             <h3 style="margin-top:14px">Headlines geotagged by state</h3><div id="state-counts" class="small"></div></div>
+      </div>
+    </div>
+
+    <div class="panel" id="panel-stats">
+      <div class="explain"><b>Mann-Kendall trend test</b> asks whether a weekly series rises or falls consistently, without assuming a straight line or normal data. <b>Sen's slope</b> is the median change per week. Hamed-Rao correction accounts for autocorrelation. p &lt; 0.05 = significant.</div>
+      <div class="table-wrap"><table id="trends-table"></table></div>
+      <div class="explain" style="margin-top:16px"><b>Lagged Spearman correlation</b> between a daily hazard signal and next-day news volume (lag k: news k days after the hazard). A peak at k &gt; 0 means coverage <i>follows</i> events.</div>
+      <div class="table-wrap"><table id="corr-table"></table></div>
+      <div class="explain" style="margin-top:16px"><b>Seasonal comparison:</b> this month so far vs the same calendar days last year. Fire counts use Suomi-NPP only, the single sensor present in both years.</div>
+      <div class="table-wrap"><table id="seasonal-table"></table></div>
+    </div>
+
+    <div class="panel" id="panel-health">
+      <div class="table-wrap"><table id="health-table"></table></div>
+      <div class="note" id="health-note"></div>
+      <p class="small" style="margin-top:12px">Download CSV:
+        {% for t in ["fire_hotspots","earthquakes","weather_daily","natural_events","news_articles","news_timeline","alerts","fetch_log"] %}
+        <a href="/api/export?table={{t}}&format=csv&days=90">{{ t }}</a>{% if not loop.last %} · {% endif %}{% endfor %}
+      </p>
+    </div>
+  </section>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.heat/0.2.0/leaflet-heat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="/static/js/dashboard.js"></script>
+{% endblock %}

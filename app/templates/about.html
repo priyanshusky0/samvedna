@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% set active = 'about' %}
+{% block title %}SAMVEDNA · Methodology{% endblock %}
+{% block body %}
+<main class="prose">
+  <h2 style="margin-top:0">What this is</h2>
+  <p>SAMVEDNA collects live, open data on fires, earthquakes, weather and natural events for {{ cfg.states|length }} states of southern and western India,
+     plus Indian news coverage of those hazards. It cleans and stores the data, flags unusual activity with simple, explainable statistics, and puts
+     everything on one map-centred dashboard to support Humanitarian Assistance &amp; Disaster Relief (HADR) planning. It is an independent student project.</p>
+  <p><b>States:</b> {{ cfg.states|join(", ") }}. <b>Bounding box</b> (W, S, E, N): {{ cfg.bbox|join(", ") }}.</p>
+
+  <h2>Data sources</h2>
+  <ul>
+    <li><b>NASA FIRMS</b>: VIIRS active-fire detections (NOAA-20, Suomi-NPP) plus the public yearly India archive for a seasonal baseline.</li>
+    <li><b>USGS FDSN</b>: earthquakes M ≥ {{ cfg.usgs_min_magnitude }}.</li>
+    <li><b>Open-Meteo</b>: daily rainfall, max/min temperature and wind at each state capital (ERA5 archive + forecast).</li>
+    <li><b>NASA EONET</b>: curated natural events (floods, storms, wildfires…).</li>
+    <li><b>GDELT DOC 2.0</b>: Indian news articles and daily volume/tone timelines for four hazard queries.</li>
+  </ul>
+  <p>All sources are public and free to use with attribution. Requests are rate-limited (GDELT ≥ {{ cfg.gdelt_min_interval_s|int }} s apart, slowing down automatically after HTTP 429),
+     cached for {{ (cfg.cache_ttl_s/60)|int }} min, sent with a project User-Agent, and every raw response is archived for audit. No personal data is collected.</p>
+
+  <h2>Cleaning rules</h2>
+  <ul>
+    <li>All timestamps converted to Asia/Kolkata (IST).</li>
+    <li>Rows outside the bounding box or the selected state polygons are rejected (offshore points within ~25 km go to the nearest state).</li>
+    <li>FIRMS: “low” confidence detections dropped; detections by different satellites within {{ cfg.firms_dedup_distance_m|int }} m and {{ cfg.firms_dedup_minutes }} min collapsed to the most confident one; static industrial sources dropped.</li>
+    <li>GDELT: duplicate URLs and near-duplicate headlines (normalised-title hash) removed.</li>
+    <li>Range checks (magnitude ≥ 0, rainfall ≥ 0, plausible temperatures). Missing values stay missing; nothing is silently filled.</li>
+    <li>Rejected-row counts per reason are stored with each fetch (see Data health).</li>
+  </ul>
+
+  <h2>Anomaly detection</h2>
+  <p>For every state and metric, today's value is compared with the previous {{ cfg.anomaly_window_days }} days (today excluded):</p>
+  <p class="formula">z<sub>t</sub> = (x<sub>t</sub> − mean(x<sub>t−{{ cfg.anomaly_window_days }}</sub> … x<sub>t−1</sub>)) / sd(x<sub>t−{{ cfg.anomaly_window_days }}</sub> … x<sub>t−1</sub>)</p>
+  <p>z ≥ {{ cfg.z_medium }} is <b>medium</b>, z ≥ {{ cfg.z_high }} is <b>high</b>. To avoid alerts on tiny numbers (one quake after a quiet month), each metric
+     also has a minimum absolute value. Temperature series with two years of data also get an <b>STL</b> seasonal decomposition; residuals more than
+     {{ cfg.stl_resid_z }} robust standard deviations (1.4826 × MAD) above the seasonal expectation are flagged. Fire counts are also compared with the same
+     ±15 days one year earlier (Suomi-NPP only), which works even without 30 days of recent history.</p>
+
+  <h2>Trends, correlation and seasonality</h2>
+  <p><b>Mann-Kendall</b> (Hamed-Rao correction for autocorrelation) on complete weeks, with <b>Sen's slope</b> as the robust rate of change.
+     <b>Spearman</b> rank correlation between daily hazard signals and GDELT news volume at lags 0–{{ cfg.max_lag_days }} days.
+     The seasonal table compares this month so far with the same calendar days last year.</p>
+
+  <h2>NLP</h2>
+  <p>TF-IDF (unigrams + bigrams, custom stop-words) gives each hazard's keywords overall and per week. NMF ({{ cfg.nlp_topics }} components) on the same
+     matrix finds topic clusters, shown with their top terms and most typical headlines. Tone uses GDELT's document tone, plus VADER sentiment on headlines.
+     Headlines are tagged to a state when they name the state or one of its major cities.</p>
+
+  <h2>Limitations</h2>
+  <ul>
+    <li>GDELT's DOC API only covers about the last three months and is strongly rate-limited.</li>
+    <li>Satellites pass over a point only a few times a day; clouds and smoke hide fires.</li>
+    <li>Headline geotagging misses articles that name only a district or village, and can mis-tag shared names.</li>
+    <li>One weather point per state cannot represent a whole state's rainfall.</li>
+    <li>Without a FIRMS MAP_KEY only the last 7 days of near-real-time fire data can be fetched.</li>
+  </ul>
+  <p>Full details are in <code>report/report.md</code>. Interactive API documentation: <a href="/docs">/docs</a>.</p>
+</main>
+{% endblock %}
