@@ -41,6 +41,11 @@ METRICS: dict[str, Metric] = {
 NEWS_REGION = "India"  # GDELT timelines are national, not per state
 
 
+def _empty(columns: list[str]) -> pd.DataFrame:
+    """An empty frame that still has a DatetimeIndex, so date filters work on it."""
+    return pd.DataFrame(columns=columns, dtype=float, index=pd.DatetimeIndex([]))
+
+
 def _read(stmt) -> pd.DataFrame:
     with engine.connect() as conn:
         return pd.read_sql(stmt, conn)
@@ -49,7 +54,7 @@ def _read(stmt) -> pd.DataFrame:
 def _pivot_counts(df: pd.DataFrame, time_col: str, covered: pd.DatetimeIndex | None) -> pd.DataFrame:
     states = get_settings().states
     if df.empty:
-        return pd.DataFrame(columns=states, dtype=float)
+        return _empty(states)
     df["day"] = pd.to_datetime(df[time_col]).dt.normalize()
     wide = df.groupby(["day", "state"]).size().unstack("state").reindex(columns=states)
     idx = pd.date_range(wide.index.min(), pd.Timestamp.today().normalize(), freq="D")
@@ -83,7 +88,7 @@ def weather_daily(col: str) -> pd.DataFrame:
     df = _read(select(WeatherDaily.state, WeatherDaily.date, getattr(WeatherDaily, col))
                .where(WeatherDaily.is_forecast.is_(False)))
     if df.empty:
-        return pd.DataFrame(columns=get_settings().states, dtype=float)
+        return _empty(get_settings().states)
     wide = df.pivot(index="date", columns="state", values=col)
     wide.index = pd.to_datetime(wide.index)
     return wide.asfreq("D").reindex(columns=get_settings().states)
@@ -92,7 +97,7 @@ def weather_daily(col: str) -> pd.DataFrame:
 def news_daily(hazard: str) -> pd.DataFrame:
     df = _read(select(NewsTimeline.date, NewsTimeline.volume).where(NewsTimeline.hazard_tag == hazard))
     if df.empty:
-        return pd.DataFrame(columns=[NEWS_REGION], dtype=float)
+        return _empty([NEWS_REGION])
     s = df.set_index(pd.to_datetime(df["date"]))["volume"].rename(NEWS_REGION)
     return s.asfreq("D").to_frame()
 

@@ -87,7 +87,7 @@ def run_archive(year: int) -> int:
                     for chunk in resp.iter_bytes():
                         f.write(chunk)
             tmp.rename(dest)
-        for raw in pd.read_csv(dest, chunksize=200_000):
+        for raw in pd.read_csv(dest, chunksize=100_000):
             fr.fetched += len(raw)
             clean, rej = clean_firms(raw)
             fr.reject(rej)

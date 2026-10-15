@@ -21,7 +21,7 @@ services:
       DATABASE_URL: postgresql+psycopg://samvedna:samvedna@db:5432/samvedna
       FIRMS_MAP_KEY: ${FIRMS_MAP_KEY:-}
       ENABLE_SCHEDULER: "true"
-      AUTO_BACKFILL: "true"
+      AUTO_BACKFILL: ${AUTO_BACKFILL:-true}
     ports:
       - "8000:8000"
     volumes:

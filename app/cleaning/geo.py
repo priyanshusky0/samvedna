@@ -48,6 +48,15 @@ def _tree() -> STRtree:
     return STRtree(load_states()[1])
 
 
+@lru_cache
+def _other_states_tree() -> STRtree:
+    """Polygons of Indian states we do NOT monitor (to stop coastal snapping into them)."""
+    wanted = {s.lower() for s in get_settings().states}
+    data = json.loads(get_settings().geo_path.read_text())
+    return STRtree([shape(f["geometry"]).buffer(0) for f in data["features"]
+                    if ascii_name(f["properties"]["shapeName"]).lower() not in wanted])
+
+
 def tag_states(lat: pd.Series | np.ndarray, lon: pd.Series | np.ndarray) -> np.ndarray:
     """Vectorised point-in-polygon. Returns an object array of state names / None."""
     names, _ = load_states()
@@ -60,8 +69,12 @@ def tag_states(lat: pd.Series | np.ndarray, lon: pd.Series | np.ndarray) -> np.n
     pt_idx, poly_idx = _tree().query(pts, predicate="intersects")
     out[pt_idx] = np.array(names, dtype=object)[poly_idx]
 
-    # Coastal fallback for points that missed every polygon.
+    # Coastal fallback for points that missed every polygon, unless they lie
+    # inside another (unmonitored) Indian state.
     miss = np.flatnonzero(pd.isna(out))
+    if len(miss):
+        in_other, _ = _other_states_tree().query(pts[miss], predicate="intersects")
+        miss = np.delete(miss, np.unique(in_other))
     if len(miss):
         near_pt, near_poly = _tree().query_nearest(
             pts[miss], max_distance=COASTAL_BUFFER_DEG, all_matches=False

@@ -28,6 +28,9 @@ def run(history_days: int = 0) -> int:
     with FetchRun(SOURCE) as fr:
         frames = []
         for state in cfg.states:
+            if state not in cfg.state_points:
+                fr.reject({"no_weather_point_configured": 1})
+                continue
             lat, lon = cfg.state_points[state]
             base = {"latitude": lat, "longitude": lon, "daily": DAILY, "timezone": cfg.timezone}
             if history_days:

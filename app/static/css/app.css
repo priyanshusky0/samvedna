@@ -200,3 +200,13 @@ footer p { margin: 4px 0; }
   .kw { grid-template-columns: 100px 1fr; }
   nav { order: 3; width: 100%; }
 }
+
+/* Grid children must be allowed to shrink below their content width on phones. */
+.card, .kpi, .row-map > *, .grid-2 > *, .grid-3 > * { min-width: 0; }
+.alert .msg, .headlines a, .topic li { overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  .brand p { display: none; }
+  .layer-toggles label { font-size: 12px; padding: 2px 8px; }
+  .kpi .value { font-size: 24px; }
+  .chart-box { height: 240px; }
+}
